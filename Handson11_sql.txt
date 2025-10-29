@@ -1,0 +1,124 @@
+-- ================================================
+-- AWS Data Analytics Hands-On Lab
+-- E-Commerce Sales Data Analysis Queries
+-- ================================================
+
+-- Query 1: Cumulative Sales Over Time for a Specific Year
+-- This query calculates the running total of sales for each day in 2022
+SELECT 
+    date,
+    amount,
+    SUM(amount) OVER (
+        ORDER BY date 
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS cumulative_sales
+FROM raw_ecommerce_raw_bucket_vm_9876
+WHERE date LIKE '%22'
+ORDER BY date
+LIMIT 10;
+
+-- ================================================
+
+-- Query 2: Geographic Hotspot Analysis for Unprofitable Products
+-- This query identifies states with the most cancelled orders
+SELECT 
+    `ship-state`,
+    status,
+    amount
+FROM raw_ecommerce_raw_bucket_vm_9876
+WHERE status = 'Cancelled'
+LIMIT 10;
+
+-- ================================================
+
+-- Query 3: Impact of Fulfillment Method on Sales by Category
+-- This query analyzes Amazon vs Merchant fulfillment performance
+SELECT 
+    category,
+    fulfilment,
+    COUNT(*) AS order_count,
+    SUM(amount) AS total_sales,
+    ROUND(AVG(amount), 2) AS avg_order_value,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY category), 2) AS pct_of_category
+FROM raw_ecommerce_raw_bucket_vm_9876
+WHERE category IS NOT NULL 
+  AND category != ''
+  AND fulfilment IS NOT NULL
+GROUP BY category, fulfilment
+ORDER BY category, total_sales DESC
+LIMIT 10;
+
+-- ================================================
+
+-- Query 4: Top 3 Most Profitable Products Within Each Category
+-- This query uses window functions to rank products by total sales
+WITH product_rankings AS (
+    SELECT 
+        category,
+        sku,
+        style,
+        SUM(amount) AS total_sales,
+        COUNT(*) AS order_count,
+        ROW_NUMBER() OVER (
+            PARTITION BY category 
+            ORDER BY SUM(amount) DESC
+        ) AS product_rank
+    FROM raw_ecommerce_raw_bucket_vm_9876
+    WHERE category IS NOT NULL AND category != ''
+    GROUP BY category, sku, style
+)
+SELECT 
+    category,
+    sku,
+    style,
+    ROUND(total_sales, 2) AS total_sales,
+    order_count,
+    product_rank
+FROM product_rankings
+WHERE product_rank <= 3
+ORDER BY category, product_rank
+LIMIT 10;
+
+-- ================================================
+
+-- Query 5: Monthly Sales and Profit Growth Analysis
+-- This query calculates month-over-month growth rates
+WITH monthly_data AS (
+    SELECT 
+        CONCAT(
+            '20', 
+            SUBSTRING(date, 10, 2), 
+            '-', 
+            SUBSTRING(date, 4, 2)
+        ) AS year_month,
+        COUNT(*) AS total_orders,
+        SUM(amount) AS total_sales,
+        AVG(amount) AS avg_order_value
+    FROM raw_ecommerce_raw_bucket_vm_9876
+    WHERE date IS NOT NULL
+    GROUP BY CONCAT('20', SUBSTRING(date, 10, 2), '-', SUBSTRING(date, 4, 2))
+)
+SELECT 
+    year_month,
+    total_orders,
+    ROUND(total_sales, 2) AS total_sales,
+    ROUND(avg_order_value, 2) AS avg_order_value,
+    LAG(total_orders) OVER (ORDER BY year_month) AS prev_month_orders,
+    ROUND(LAG(total_sales) OVER (ORDER BY year_month), 2) AS prev_month_sales,
+    ROUND(
+        ((total_orders - LAG(total_orders) OVER (ORDER BY year_month)) * 100.0 / 
+        NULLIF(LAG(total_orders) OVER (ORDER BY year_month), 0)), 
+        2
+    ) AS order_growth_pct,
+    ROUND(
+        ((total_sales - LAG(total_sales) OVER (ORDER BY year_month)) * 100.0 / 
+        NULLIF(LAG(total_sales) OVER (ORDER BY year_month), 0)), 
+        2
+    ) AS sales_growth_pct
+FROM monthly_data
+ORDER BY year_month
+LIMIT 10;
+
+-- ================================================
+-- End of Queries
+-- ================================================
